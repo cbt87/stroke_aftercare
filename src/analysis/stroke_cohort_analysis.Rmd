@@ -1,0 +1,533 @@
+---
+title: "pharmetrix_eda"
+output: html_document
+date: "2024-10-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## import packages
+
+```{r}
+library(ohdsilab)
+library(tidyverse)
+library(DatabaseConnector)
+library(keyring)
+library(FeatureExtraction)
+library(stats)
+library(purrr)
+library(table1)
+library(easystats)
+library(glue)
+```
+
+## Set up connection to database
+
+```{r}
+cdm_schema = "omop_cdm_53_pmtx_202203"
+write_schema = paste0("work_", keyring::key_get("db_username"))
+
+# Create the connection
+con =  DatabaseConnector::connect(
+  dbms = "redshift",
+  server = "ohdsi-lab-redshift-cluster-prod.clsyktjhufn7.us-east-1.redshift.amazonaws.com/ohdsi_lab",
+  pathToDriver = 'D:/Users/tilton.ca',
+  port = 5439,
+  user = keyring::key_get("db_username"),
+  password = keyring::key_get("db_password")
+)
+
+# Test if the connection words
+if(isTRUE(DatabaseConnector::dbIsValid(con))){print("Connected Successfully")}
+
+# make it easier for some r functions to find the database
+options(con.default.value = con)
+options(schema.default.value = cdm_schema)
+options(write_schema.default.value = write_schema)
+```
+## set schema and table names for the sql queries
+
+```{r}
+personal_schema <- "work_tilton_ca204"
+model_table_name <- "full_model_1_demo"
+insurance_table_name <- "model_1_insurance_demo"
+cohort_table_name <- "stroke_cohort_w_conditions_demo"
+```
+
+
+## Use getdbcovariateData() to calculate Charlson Comorbidity index for all patients in the cohort
+
+```{r}
+#  settings <- createCovariateSettings(
+#    useCharlsonIndex=TRUE
+#  )
+# 
+# # Create the connection
+# 
+# connectionDetails<-createConnectionDetails(
+#  dbms="redshift",
+#  server= "ohdsi-lab-redshift-cluster-prod.clsyktjhufn7.us-east-1.redshift.amazonaws.com/ohdsi_lab",
+#  pathToDriver = 'D:/Users/tilton.ca',
+#  port = 5439,
+#  user = keyring::key_get("db_username"),
+#  password = keyring::key_get("db_password")
+#  )
+# 
+# 
+#  covariateData <- getDbCovariateData(
+#  connectionDetails = connectionDetails,
+#  cdmDatabaseSchema = "omop_cdm_53_pmtx_202203",
+#  cohortDatabaseSchema = "work_tilton_ca204",
+#  cohortTable = "stroke_cohort_w_conditions_test",
+#  rowIdField = "subject_id",
+#  cohortIds = -1,
+#  covariateSettings = settings
+#  )
+#  summary(covariateData)
+
+```
+
+
+```{r}
+#covariateData$covariates
+```
+
+# save the CCI data in a file
+```{r}
+#saveCovariateData(covariateData, "covariates")
+```
+
+## load the CCI data file
+```{r}
+#covariate_file <- loadCovariateData("covariates")
+covariate_file <- loadCovariateData("D:/Users/tilton.ca/Documents/r-ohdsi/Casey_Tilton_OHDSI/covariates")
+CCI_df <- covariate_file$covariates
+CCI_df
+```
+
+## plotting the distribution of CCI. 
+Due to the right tail, I will use median to impute missing values, not mean
+```{r}
+ggplot(CCI_df, aes(x = covariateValue) ) + 
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
+  labs(title = "Distribution of Charlson comorbidity index", x = "CCI", y = "Count of patients") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(CCI_df, aes(x = "", y = covariateValue)) +
+  geom_boxplot(fill = "steelblue", color = "black") +
+  labs(title = "Boxplot of Numbers", x = "", y = "Numbers") +
+  theme_minimal()
+```
+
+
+
+## function that calculates and plots confidence intervals for model parameters
+
+```{r}
+age_labels <- c("18-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+")
+plot_model_coefficients <- function(model, age_group_labels, model_name) {
+  # Extract coefficients and confidence intervals
+  coefficients <- summary(model)$coefficients
+  confint_vals <- confint(model)
+  
+  # Prepare data for plotting
+  plot_data <- data.frame(
+    Group = rownames(coefficients)[-1], # Remove the intercept row
+    Coefficient = coefficients[-1, 1], # Extract coefficients excluding intercept
+    LowerCI = confint_vals[-1, 1],     # Exclude intercept from confint
+    UpperCI = confint_vals[-1, 2],     # Exclude intercept from confint
+    Significance = coefficients[-1, 4] < 0.05 # Exclude intercept significance
+  )
+  
+  # Identify AGE_GROUP contrasts and relabel them
+  age_group_rows <- grep("^AGE_GROUP", plot_data$Group)
+  num_groups <- length(age_group_labels) - 1 # Sum contrast has one less group
+  if (length(age_group_rows) != num_groups) {
+    stop("Number of AGE_GROUP contrasts does not match the number of age group labels minus one.")
+  }
+  plot_data$Group[age_group_rows] <- paste0(age_group_labels[1:num_groups], " vs AGE_GROUP grand mean")
+  
+  # Create the plot
+  plot <- ggplot(plot_data, aes(x = Group, y = Coefficient)) +
+    geom_point(aes(color = Significance), size = 3) +
+    geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI, color = Significance), width = 0.2) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = 0.8) +
+    scale_y_continuous(breaks = seq(floor(min(plot_data$LowerCI)), 
+                                    ceiling(max(plot_data$UpperCI)), 
+                                    by = 0.25)) + # Set ticks every 0.25
+    theme_minimal() +
+    labs(title = "Confidence Intervals for Parameters in Model",
+         x = "Model Parameters",
+         y = "Coefficient") +
+    coord_flip() +
+    scale_color_manual(values = c("TRUE" = "blue", "FALSE" = "orange"), 
+                       name = "Significant at <.05") +
+    theme(axis.text.x = element_text(size = 14),
+          axis.text.y = element_text(size = 14),
+          plot.title = element_text(size = 14, face = "bold"))
+  
+  # Display the plot
+  print(plot)
+
+  # Save the plot as a PNG file
+  file_path <- paste0("D:/Users/tilton.ca/Documents/github/project-cbt87/figs/", model_name, ".png")
+  ggsave(filename = file_path, plot = plot, width = 10, height = 7, dpi = 300)
+}
+```
+
+## crosstabs function
+```{r}
+# List of predictors
+predictors <- c("HAS_PARKINSONS", "HAS_MIGRAINE", "HAS_DEPRESSION","HAS_INSOMNIA", "HAS_DEMENTIA", "HAS_PARALYSIS","HAS_ISCHEMIC_STROKE", "SEVERITY", "GENDER", "AGE_GROUP")
+
+# Crosstab function
+generate_crosstab <- function(predictor, df, target_variable) {
+  crosstab <- table(df[[predictor]], df[[target_variable]])
+  chisq_result <- chisq.test(crosstab) # Chi-squared test
+  list(
+    crosstab = crosstab,
+    chisq_p_value = chisq_result$p.value
+  )
+}
+```
+
+## import previously created model dataset from personal schema
+
+```{r}
+
+sql_query <- glue("select * from {personal_schema}.{model_table_name}")
+full_model_1 <- querySql(con, sql_query)
+```
+
+```{r}
+full_model_1
+```
+
+## import previously created insurance plan data for each model 1 cohort from personal schema
+
+```{r}
+sql_query <- glue("select * from {personal_schema}.{insurance_table_name};")
+insurance_table <- querySql(con, sql_query)
+insurance_table
+```
+
+
+
+## left join the model dataframe created in dbeaver with the Charlson comorbidity index data, There are 1623 patients (~6.3%) who didn't have a CCI index(not sure why). Next, inner join the insurance plan data by person_id. This pipeline removes the unnecessary covariateid column, renames the covariatevalue column to CCI, turns the target variable into binary, imputes the median CCI value into the rows that are missing data, removes patients under 18, and breaks the patient_age variable into age bins. Then it codes the AGE_GROUP variable using sum-to-zero contrast coding to compare each group as how it deviates from the grand mean. 
+
+```{r}
+age_breaks <- c(18, 30, 40, 50, 60, 70, 80, Inf)
+age_labels <- c("18-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+")
+
+
+model_1_df <- left_join(full_model_1, df_real, by = c("SUBJECT_ID" = "rowId")) |>
+  inner_join(insurance_table, by = "SUBJECT_ID") |>
+  select(-covariateId) |>
+  rename(CCI = covariateValue) |>
+  mutate(SLP_TREATMENT_STATUS = ifelse(SLP_TREATMENT_STATUS == "SLP_treatment", 1,0)) |>
+  mutate(CCI = replace_na(CCI, median(CCI, na.rm = TRUE))) |>
+  filter(PATIENT_AGE >= 18) |>
+  mutate(
+    AGE_GROUP = cut(
+      PATIENT_AGE,
+      breaks = age_breaks,
+      labels = age_labels,
+      right = FALSE,
+      ordered_result = FALSE))
+  
+
+
+contrasts(model_1_df$AGE_GROUP) <- contr.sum(length(levels(model_1_df$AGE_GROUP)))
+
+
+model_1_df
+```
+
+# Creating the Descriptive Statistics Table (aka Table 1)
+
+## bring in the full cohort table
+
+```{r}
+sql_query <- glue("select * from {personal_schema}.{cohort_table_name};")
+cohort_with_conditions <- querySql(con, sql_query)
+cohort_with_conditions
+```
+
+
+## Using the pivot_longer() function to create a row for each condition per person
+
+```{r}
+
+cols_to_convert <- c("SLP_TREATMENT_STATUS", "HAS_PARKINSONS", "HAS_MIGRAINE", "HAS_DEPRESSION", "HAS_INSOMNIA", "HAS_DEMENTIA", "HAS_PARALYSIS", "HAS_ISCHEMIC_STROKE")
+
+model_1_df_longer <- inner_join(cohort_with_conditions, model_1_df, by = "SUBJECT_ID") |>
+  pivot_longer(
+    cols = c(HAS_APHASIA, HAS_DYSPHAGIA, HAS_DYSARTHRIA), # Specify exact column names
+    names_to = "SPEECH_CONDITION", # Name for new column
+    values_to = "HAS_CONDITION" # Name for values
+  ) |>
+  filter(HAS_CONDITION == 1) %>% # Keep rows where the condition is present
+  mutate(SPEECH_CONDITION = str_remove(SPEECH_CONDITION, "HAS_") %>% # Remove prefix
+           tolower()) |> # Convert to lowercase
+  mutate(across(all_of(cols_to_convert), as.factor))
+
+model_1_df_longer
+```
+
+## generate table1
+
+```{r}
+overall_df <- model_1_df_longer |>
+  distinct(SUBJECT_ID, HAS_PARKINSONS, HAS_MIGRAINE, HAS_DEPRESSION, HAS_INSOMNIA, HAS_DEMENTIA, HAS_PARALYSIS, HAS_ISCHEMIC_STROKE, SEVERITY, GENDER, AGE_GROUP, PATIENT_AGE, CCI, INSURANCE_PLAN, SLP_TREATMENT_STATUS) |>
+  mutate(SPEECH_CONDITION = "Total")
+
+# Combine "Overall" group with original data
+df_combined <- bind_rows(model_1_df_longer, overall_df)
+
+# Generate the table
+label(df_combined$HAS_PARKINSONS) <- "Parkinson's Disease"
+label(df_combined$HAS_MIGRAINE) <- "Migraine"
+label(df_combined$HAS_DEPRESSION) <- "Depression"
+label(df_combined$HAS_INSOMNIA) <- "Insomnia"
+label(df_combined$HAS_DEMENTIA) <- "Dementia"
+label(df_combined$HAS_PARALYSIS) <- "Paralysis"
+label(df_combined$HAS_ISCHEMIC_STROKE) <- "Ischemic Stroke"
+label(df_combined$SEVERITY) <- "Severity"
+label(df_combined$GENDER) <- "Gender"
+label(df_combined$AGE_GROUP) <- "Age Group"
+label(df_combined$PATIENT_AGE) <- "Age *"
+label(df_combined$CCI) <- "Charlson Comorbidity Index"
+label(df_combined$INSURANCE_PLAN) <- "Insurance Plan"
+label(df_combined$SLP_TREATMENT_STATUS) <- "SLP Treatment Status"
+
+footnote <- "* We drop age as a continuous variable in favor of age groups in the final models because patients born before or during 1937 are all binned into one year"
+
+table1(~HAS_PARKINSONS + HAS_MIGRAINE + HAS_DEPRESSION + HAS_INSOMNIA + HAS_DEMENTIA + HAS_PARALYSIS + HAS_ISCHEMIC_STROKE + SEVERITY + GENDER + AGE_GROUP + PATIENT_AGE + CCI + INSURANCE_PLAN + SLP_TREATMENT_STATUS | SPEECH_CONDITION, data = df_combined, overall = FALSE, footnote = footnote)
+```
+
+## Splitting the table 1 into two columns so I can display it in a powerpoint slide
+
+```{r}
+# Split variables into two groups
+table1_part1 <- table1(~ HAS_PARKINSONS + HAS_MIGRAINE + HAS_DEPRESSION + 
+                        HAS_INSOMNIA + HAS_DEMENTIA + HAS_PARALYSIS + HAS_ISCHEMIC_STROKE + SEVERITY + GENDER | SPEECH_CONDITION, 
+                        data = df_combined, overall = FALSE)
+
+table1_part2 <- table1(~ AGE_GROUP + 
+                        PATIENT_AGE + CCI + INSURANCE_PLAN + SLP_TREATMENT_STATUS | SPEECH_CONDITION, 
+                        data = df_combined, overall = FALSE, footnote = footnote)
+
+# Save these separately or display side-by-side on the slide.
+
+```
+
+```{r}
+table1_part1
+table1_part2
+```
+
+
+
+## model including any patient that has one or more of the three conditions
+
+```{r}
+model_any_condition <- glm(SLP_TREATMENT_STATUS ~ HAS_PARKINSONS + HAS_MIGRAINE + HAS_DEPRESSION + HAS_INSOMNIA + HAS_DEMENTIA + HAS_PARALYSIS + HAS_ISCHEMIC_STROKE + SEVERITY + GENDER + AGE_GROUP + CCI, data = model_1_df, family = "binomial")
+print(summary(model_any_condition), show.residuals = TRUE)
+```
+
+## use the function from above to plot the confidence intervals for the coefficients
+
+```{r}
+
+plot_model_coefficients(model_any_condition, age_labels, "model_any_condition")
+```
+## Output model results in a formatted table
+```{r}
+parameters::model_parameters(model_any_condition) |> 
+  insight::format_table() |> 
+  insight::print_html()
+```
+
+
+## Join the cohort table with the model 1 table
+
+```{r}
+model_1_df_joined <-inner_join(cohort_with_conditions, model_1_df, by = "SUBJECT_ID")
+model_1_df_joined
+```
+
+
+
+## filter dataframes to only include patients that have a specific speech condition
+```{r}
+model_1_df_aphasia <- model_1_df_joined |>
+  filter(HAS_APHASIA == 1)
+model_1_df_aphasia
+
+model_1_df_dysphagia <- model_1_df_joined |>
+  filter(HAS_DYSPHAGIA == 1)
+model_1_df_dysphagia
+
+model_1_df_dysarthria <- model_1_df_joined |>
+  filter(HAS_DYSARTHRIA == 1)
+model_1_df_dysarthria
+```
+
+
+# logistic regression model for aphasia
+```{r}
+model_aphasia <- glm(SLP_TREATMENT_STATUS ~ HAS_PARKINSONS + HAS_MIGRAINE + HAS_DEPRESSION + HAS_INSOMNIA + HAS_DEMENTIA + HAS_PARALYSIS + HAS_ISCHEMIC_STROKE + SEVERITY + GENDER + AGE_GROUP + CCI, data = model_1_df_aphasia, family = "binomial")
+print(summary(model_aphasia), show.residuals = TRUE)
+```
+
+
+```{r}
+plot_model_coefficients(model_aphasia, age_labels, "aphasia")
+```
+
+```{r}
+parameters::model_parameters(model_aphasia) |> 
+  insight::format_table() |> 
+  insight::print_html()
+```
+
+
+# logistic regression model for dysphagia
+
+```{r}
+model_dysphagia <- glm(SLP_TREATMENT_STATUS ~ HAS_PARKINSONS + HAS_MIGRAINE + HAS_DEPRESSION + HAS_INSOMNIA + HAS_DEMENTIA + HAS_PARALYSIS + HAS_ISCHEMIC_STROKE + SEVERITY + GENDER + AGE_GROUP + CCI, data = model_1_df_dysphagia, family = "binomial")
+print(summary(model_dysphagia), show.residuals = TRUE)
+```
+
+```{r}
+plot_model_coefficients(model_dysphagia, age_labels, "dysphagia")
+```
+```{r}
+parameters::model_parameters(model_dysphagia) |> 
+  insight::format_table() |> 
+  insight::print_html()
+```
+
+
+# logistic regression model for dysarthria
+
+```{r}
+model_dysarthria <- glm(SLP_TREATMENT_STATUS ~ HAS_PARKINSONS + HAS_MIGRAINE + HAS_DEPRESSION + HAS_INSOMNIA + HAS_DEMENTIA + HAS_PARALYSIS + HAS_ISCHEMIC_STROKE + SEVERITY + GENDER + AGE_GROUP + CCI, data = model_1_df_dysarthria, family = "binomial")
+print(summary(model_dysarthria), show.residuals = TRUE)
+```
+
+```{r}
+plot_model_coefficients(model_dysarthria, age_labels, "dysarthria")
+```
+```{r}
+parameters::model_parameters(model_dysarthria) |> 
+  insight::format_table() |> 
+  insight::print_html()
+```
+
+
+## Distribution of Age variable
+
+```{r}
+ggplot(model_1_df, aes(x = PATIENT_AGE)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Age Distribution of Model 1 cohort",
+       x = "Age",
+       y = "Count")+
+  theme_minimal()
+```
+## Distribution of Age Group variable
+```{r}
+
+
+# Define the age breaks and labels
+age_breaks <- c(18, 30, 40, 50, 60, 70, 80, Inf)
+age_labels <- c("18-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+")
+
+# Use dplyr to create AGE_GROUP
+model_1_df_test <- model_1_df %>%
+  mutate(
+    AGE_GROUP = cut(
+      PATIENT_AGE,
+      breaks = age_breaks,
+      labels = age_labels,
+      right = FALSE,
+      ordered_result = TRUE
+    )
+  )
+
+# View the resulting dataframe
+glimpse(model_1_df_test)
+
+ggplot(model_1_df_test, aes(x = AGE_GROUP)) +
+  geom_bar(fill = "steelblue", color = "black") +
+  labs(
+    title = "Count of Rows by Age Group",
+    x = "Age Group",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels for readability
+  )
+
+```
+## Plot the venn diagram of the breakdown of all model 1 patients and which of the speech conditions they have
+
+```{r}
+# Install and load VennDiagram package if not already installed
+if (!require(VennDiagram)) {
+  install.packages("VennDiagram")
+  library(VennDiagram)
+}
+
+
+
+# Create sets for each condition
+aphasia_set <- model_1_df_joined$SUBJECT_ID[model_1_df_joined$HAS_APHASIA == 1]
+dysphagia_set <- model_1_df_joined$SUBJECT_ID[model_1_df_joined$HAS_DYSPHAGIA == 1]
+dysarthria_set <- model_1_df_joined$SUBJECT_ID[model_1_df_joined$HAS_DYSARTHRIA == 1]
+
+# Calculate intersections
+venn_counts <- calculate.overlap(
+  list(
+    Aphasia = aphasia_set,
+    Dysphagia = dysphagia_set,
+    Dysarthria = dysarthria_set
+  )
+)
+
+# Draw the Venn diagram
+venn_plot <- draw.triple.venn(
+  area1 = length(aphasia_set),
+  area2 = length(dysphagia_set),
+  area3 = length(dysarthria_set),
+  n12 = length(intersect(aphasia_set, dysphagia_set)),
+  n23 = length(intersect(dysphagia_set, dysarthria_set)),
+  n13 = length(intersect(aphasia_set, dysarthria_set)),
+  n123 = length(Reduce(intersect, list(aphasia_set, dysphagia_set, dysarthria_set))),
+  category = c("Aphasia", "Dysphagia", "Dysarthria"),
+  fill = c("red", "green", "blue"),
+  lty = "dashed",
+  cex = 2,
+  cat.cex = 1.5,
+  cat.pos = c(-20, 20, 180)
+)
+
+# Save the plot if desired
+png("D:/Users/tilton.ca/Documents/github/project-cbt87/figs/venn_diagram.png", width = 800, height = 800)
+grid.draw(venn_plot)
+dev.off()
+
+```
+
+
+
+
+
