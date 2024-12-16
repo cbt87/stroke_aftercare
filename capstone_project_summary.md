@@ -7,6 +7,12 @@
 
 An abbreviated summary is below.
 
+## Stakeholder
+
+* Rob Cavanaugh, PhD, CCC-SLP
+* Research Data Analyst at the Observational Health Data Sciences and Informatics Center (OHDSI) at the Roux Institute
+
+
 ## Study Replication
 
 The goal of the second half of the semester was to replicate a study that analyzes guideline adherence in the treatment of speech conditions after stroke. The study used a dataset of 4,486 stroke patients in Germany who were diagnosed with specific disorders or received speech therapy. The authors built logistic and linear regression models for 6 target variables including:
@@ -71,3 +77,13 @@ For patients with dysarthria, a diagnoses of Parkinson's is a strong predictor o
 
 <img src= "figs/model_analysis/dysarthria_summary.png" width="75%">
 <img src= "figs/model_analysis/dysarthria.png">
+
+## Limitation 
+
+* 1623 patients out of the 25,000 patients in the cohort (6.3%) did not have a CCI score and it is unclear why. I made the decision to impute the median CCI score to the rows that were missing. Is the missingness random, or does the missingness reflect something about those patients Running the model after dropping those rows affected the statistical significance and importance of some variables including the age groups
+
+* The age variable is limited in the Pharmetrix+ database compared to the German study because patients born before or during 1937 are all binned into one year.
+
+## Acknowledgments
+
+* Thanks to Rob Cavanaugh for his guidance and mentorship
