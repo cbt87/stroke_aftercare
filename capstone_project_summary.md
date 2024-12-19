@@ -9,7 +9,7 @@ An abbreviated summary is below.
 
 ## Stakeholder
 
-* Rob Cavanaugh, PhD, CCC-SLP
+* [Rob Cavanaugh, PhD, CCC-SLP](https://roux.northeastern.edu/people/rob-cavanaugh/)
 * Research Data Analyst at the Observational Health Data Sciences and Informatics Center (OHDSI) at the Roux Institute
 
 
