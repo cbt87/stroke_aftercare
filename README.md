@@ -4,7 +4,7 @@
 
 For my capstone project for my M.S. in Data Science from Northeastern University, I worked with a stakeholder at the Observational Health Data Sciences and Informatics Center (OHDSI) at Northeastern to study stroke survivor aftercare. Using a combination of SQL and python, I created a cohort/phenotype of stroke patients from a large commercial health insurance claims database built in the Observational Medical Outcomes Partnership [(OMOP) Common Data Model (CDM)](https://www.ohdsi.org/data-standardization/) standard. Then I performed a statistical analysis in R of factors affecting the likelihood of receiving speech language treatment for aphasia, dysarthria, and dysphagia for stroke patients. The full details of the project and results can be found in [capstone_project_summary.md](/capstone_project_summary.md).
 
-This README file contains technical instructions to create the stroke cohort either through amazon redshift connector in python or by running SQL files in a database management tool. 
+This README file contains technical instructions to create the cohort of stroke patients either through amazon redshift connector in python or by running SQL files in a database management tool. 
 
 ## Instructions to create the cohort, model target vector, and model feature matrix in python or directly in a dbms
 
